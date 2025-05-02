@@ -99,7 +99,6 @@ for xx in np.arange(intlight.shape[1]):
             init = [1e-6, 260., sigma_init_kms, 1e-5]
             low = [-np.inf, 220., sigma_init_kms * 0.99, 0.]
             up = [np.inf, 300., sigma_init_kms * 1.01, np.inf]
-            line_centers = [line_center]
             # now fit a Gaussian to the H2 line -- use observed (not rest) wavelengths since we require a velocity close to systemic
             # try/except statement deals with cases where the fitting fails because there is no emission line to fit
             try:
@@ -107,10 +106,10 @@ for xx in np.arange(intlight.shape[1]):
                 err_ext = np.ones(whfit.sum()) * cont_rms
                 fit_gauss = least_squares(residuals, init, bounds=(low, up),
                                           args=(wave_orig[whfit], spec_ext[whfit],
-                                                err_ext, line_centers))
+                                                err_ext, [line_center]))
                 # calculate the surface brightness of the line -- need to convert sigma_v to sigma_wave
                 # result is in erg/cm^2/s/Sr
-                s1_sb = np.sqrt(2 * np.pi) * fit_gauss.x[2] / 3e5 * line_centers[0] * fit_gauss.x[3]
+                s1_sb = np.sqrt(2 * np.pi) * fit_gauss.x[2] / 3e5 * line_center * fit_gauss.x[3]
                 # calculate uncertainty from fit statistics
                 J = fit_gauss.jac
                 cov = np.linalg.inv(J.T.dot(J))
@@ -145,7 +144,7 @@ for xx in np.arange(intlight.shape[1]):
                     spec_ext_fit = np.copy(wave)
                     spec_ext_fit[~whfit] = np.nan
                     specax.plot(spec_ext_fit, spec_ext, color='C4', label='Used in Fit')
-                    model = gaussian_fit_bkg(fit_gauss.x, wave_orig[whfit], line_centers)
+                    model = gaussian_fit_bkg(fit_gauss.x, wave_orig[whfit], [line_center])
                     specax.plot(wave[whfit], model, color='C1', label='Gaussian Fit')
                     specax.set_title('({},{}): '.format(xx, yy) + 'Detected')
                     specax.set_ylim(-0.0001, 0.0005)
