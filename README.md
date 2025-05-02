@@ -1,5 +1,5 @@
 # LeoPH2MRS
-Code to analyze the H2 rotational lines detected in JWST MIRI-MRS observations of Leo P, presented in Telford et al. (2025, Nature, submitted). This repository is currently under construction and will be completed before the paper is published.
+Code to analyze the H2 rotational lines detected in JWST MIRI-MRS observations of Leo P, presented in Telford et al. (2025, Nature, submitted).
 
 Two Python scripts perform the following calculations on the reduced MRS data:
 
