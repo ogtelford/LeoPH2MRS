@@ -204,3 +204,122 @@ for ch in [2, 3]:
                 ax.text(0.05, 0.2,
                         r'%.1f-$\sigma$ detection' % (line_sb / line_sb_err),
                         fontsize=7, color='k', transform=ax.transAxes)
+
+# now that we have intensity measurements/limits, we can test what range of temperatures and column densities are allowed
+# first, define some constants (many from Roeuff+ 2019; see Table 2 in Telford+ 2025)
+Eu_over_k_dict = {'H200S1': 1015.1, 'H200S2': 1681.6, 'H200S3': 2503.7}  # K
+A_dict = {'H200S1': 47.6e-11, 'H200S2': 275.5e-11, 'H200S3': 983.6e-11}  # 1/s
+waves_dict = {'H200S1': 17.0348, 'H200S2': 12.2786, 'H200S3': 9.6649}  # micron
+planck_const = 6.626e-27  # erg s
+c = 3e10  # cm/s
+cm_per_micron = 1e-4
+
+
+def partition_func(temp):
+    # temperature in K; see Herbst+ (1996)
+    return 0.0247 * temp / (1 - np.exp(-6000. / temp))
+
+
+def coldens_line(line_name):
+    # calculate the column density in the upper level (Equation 1 in Telford+ 2025)
+    numerator = 4 * np.pi * (waves_dict[line_name] * cm_per_micron) * intensity[line_name]
+    denominator = planck_const * c * A_dict[line_name]
+    return numerator / denominator
+
+
+def g_line(line_name):
+    # calculate the statistical weight of the upper level of each transition
+    j = float(line_name[-1]) + 2
+    return (2 * (j % 2) + 1) * (2 * j + 1)
+
+
+# calculate observed column densities from fluxes
+lnratios = np.array([])
+lnratios_unc = np.array([])
+energies = np.array([])
+for line in intensity.keys():
+    logratio = np.log10(coldens_line(line) / g_line(line))
+    # take ln(column density / statistical weight)
+    lnratios = np.append(lnratios, np.log(coldens_line(line) / g_line(line)))  
+    energies = np.append(energies, Eu_over_k_dict[line])
+    lnratios_unc = np.append(lnratios_unc, intensity_err[line] / intensity[line])  # this seems weird but OK...
+# reverse the order of these lists to be compatible with the below code
+lnratios = lnratios[::-1]
+lnratios_unc = lnratios_unc[::-1]
+energies = energies[::-1]
+
+# fit a line to the ln(N/g) vs. E points -- this is just a reference point for scaling initial slope/N for every T we test below
+coeffs = np.polyfit(energies, lnratios, 1, w=lnratios_unc ** -1)
+p = np.poly1d(coeffs)
+plotfit = np.linspace(0, 3500, 1001)
+# plot the measured (or limits on) ln(N_u/g_u) vs. transition energy in K in the final panel of the figure
+ax = ax_fit
+uplims = np.array([0, 1, 1], dtype=bool)
+ax.errorbar(energies, lnratios, lnratios_unc, fmt='ko', ms=4, elinewidth=1,
+            capsize=2, uplims=uplims, label='MIRI-MRS data', zorder=5)
+# annotate the 3 points
+labels = [r'H$_2$ S(1)', r'H$_2$ S(2)', r'H$_2$ S(3)']
+for ii in range(3):
+    if ii == 0:
+        ax.text(energies[ii] + 60, lnratios[ii] + 0.03, labels[ii], ha='left', va='bottom', fontsize=7)
+    else:
+        ax.text(energies[ii] + 40, lnratios[ii] + 0.03, labels[ii], ha='left', va='bottom', fontsize=7)
+
+# now, from that initial fit, we're going to iterate over a wide range of temperatures and find the 
+# the min/best/max column densities allowed for each temperature
+Ts_that_work = np.array([])
+Ns_implied = np.array([])
+Ts_test = np.arange(80, 1001, 10)
+line_values = np.empty([len(Ts_test) * 3, len(plotfit)])
+mask = []
+# find the range of T, N allowed within 1-sigma of the S(1) intensity and 3-sigma upper limit on S(3) [more constraining than S(2)]
+for ii, T_fix in enumerate(Ts_test):
+    # this is a line with the same y-intercept from the initial fit above, but slope equal to -1/(this temperature)
+    p_new = np.poly1d([-1. / T_fix, p[0]])
+    # find the energy sample closest to S(1)
+    wh = np.argmin(np.abs(plotfit - Eu_over_k_dict['H200S1']))  
+    # calculate vertical offset to match the max, best, and min S(1)
+    scale_factors = np.array([lnratios[0] + lnratios_unc[0], lnratios[0],  
+                              lnratios[0] - lnratios_unc[0]]) - p_new(plotfit[wh])
+    # use these vertical offsets to calculate the associated column densities with each 
+    Ns_new = np.exp(p[0] + scale_factors) * 0.0247 * T_fix / (1 - np.exp(-6000 / T_fix))
+    # now, check the column density predicted for S(3)
+    wh_s3 = np.argmin(np.abs(plotfit - Eu_over_k_dict['H200S3']))
+    for jj in range(3):
+        # these are the power laws to plot associated with the min, best, and max column density given S(1) at this temperature
+        line_values[ii * 3 + jj, :] = p_new(plotfit) + scale_factors[jj]
+        if p_new(plotfit[wh_s3]) + scale_factors[jj] < lnratios[2]:
+            # ONLY add this temperature/column density pair that works for S(1) to the lists of values that are allowed if
+            # they are also consistent with the 3-sigma limit on S(3)
+            Ts_that_work = np.append(Ts_that_work, T_fix)
+            Ns_implied = np.append(Ns_implied, Ns_new[jj])
+            mask.append(True)
+        else:
+            mask.append(False)
+# get rid of any power-law functions that are NOT consistent with both S(1) and S(3) constraints
+line_values = line_values[mask, :]
+ax.set_xlim(0, 3200)
+ax.set_ylim(31.5, 38.5)
+# get nicely formatted column densities for the minimum/maximum overall allowed T and N values
+pow_max = float(str(np.max(Ns_implied))[-2:])
+pow_min = float(str(np.min(Ns_implied))[-2:])
+num_max = np.max(Ns_implied) / 10 ** pow_max
+num_min = np.min(Ns_implied) / 10 ** pow_min
+# finally, plot the power laws for these limiting parameters along with the data in the final panel
+ax.plot(plotfit, line_values[0, :], color='C0', label=r'$T$=%.0f K, ' % np.min(Ts_that_work) +
+        r'$N$=%.1f$\times10^{%.0f}$cm$^{-2}$' % (num_max, pow_max))
+ax.plot(plotfit, line_values[-1, :], color='C3', label=r'$T$=%.0f K, ' % np.max(Ts_that_work) +
+        r'$N$=%.1f$\times10^{%.0f}$cm$^{-2}$' % (num_min, pow_min))
+ax.legend(frameon=False, fontsize=7, markerfirst=False, handletextpad=0.5, handlelength=1.0)
+
+# from these limits, calculate implied warm H2 mass
+solid_angle = np.pi * (0.668/2) ** 2  # 1 resolution element at 17 micron in arcsec^2
+cm_per_arcsec = 1.6 * 3.086e+24 * 4.848e-6  # distance (Mpc) * cm/Mpc * rad/arcsec
+
+number_H2_new = np.min(Ns_implied) * solid_angle * cm_per_arcsec ** 2
+m_H2_new = number_H2_new * 2 * 1.674e-24 / 1.989e33
+print('\n\nGiven maximum allowed T of {:.0f} K, warm H2 mass is at least {:.2f} Msun'.format(np.max(Ts_that_work),
+                                                                                         m_H2_new))
+number_H2_max = np.max(Ns_implied) * solid_angle * cm_per_arcsec ** 2
+m_H2_max = number_H2_max * 2 * 1.674e-24 / 1.989e33
+print('Assuming T = {} K, warm H2 mass can be up to {:.2f} Msun'.format(np.min(Ts_test), m_H2_max))
