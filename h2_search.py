@@ -24,6 +24,9 @@ lp26_dec = 18.088
 distance = 1.62  # Mpc
 redshift = 260. / 3e5  # approximate, based on earlier data
 
+# user-set flag to determine whether plots showing the H2 S(1) emission line detected per spaxel are generated
+plotfit = True
+
 
 # function definitions
 
@@ -74,8 +77,6 @@ fig.tight_layout()
 fig.subplots_adjust(left=-0.2)
 
 # now, iterate over all spaxels in the cube and fit a Gaussian at the location of the H2 S(1) line
-# change plotfit to True to generate plots of all Gaussian fits where S(1) emission is detected
-plotfit = True
 xs_detected = []
 ys_detected = []
 for xx in np.arange(intlight.shape[1]):
@@ -153,3 +154,25 @@ for xx in np.arange(intlight.shape[1]):
             else:
                 # not a significant detection, move on
                 pass
+
+# find the center of this contiguous group of detected pixels 
+h2region_xpix = np.mean(xs_detected)
+h2region_ypix = np.mean(ys_detected)
+# translate pixel coordinates into RA and Dec
+h2region_coords = w.wcs_pix2world(h2region_xpix, h2region_ypix, 1, 1)
+# radius in pixels = half of the FWHM at 17 micron divided by pixel size in arcsec
+radius_pixels = 0.668 / 0.2 / 2  
+# now print some results to the terminal
+print('\n\nPixel radius of 1 resolution element:', radius_pixels)
+# make a SkyCoord to print nicely-formatted RA and Dec of the H2 region center
+print('Center of H2-detected region:', h2region_coords)
+sc = SkyCoord(h2region_coords[0], h2region_coords[1], unit=u.deg)
+print(sc.to_string(style='hmsdms', sep=':'))
+# annotate the figure with a circle with the center and radius calculated above as a sanity check
+circle1 = plt.Circle((h2region_xpix, h2region_ypix), radius_pixels,
+                     color='C2', fill=False, linewidth=2)
+ax.add_patch(circle1)
+
+# finally, save this location to a text file for use in h2_excitation_fit.py
+with open('coordinates_H2.txt', 'w') as outf:
+    outf.write('{}, {}'.format(*h2region_coords))
